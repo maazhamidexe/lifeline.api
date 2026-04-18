@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -18,3 +18,32 @@ class AnalyzeEcgResponse(BaseModel):
 class GenerateApiKeyResponse(BaseModel):
     status: Literal["success"]
     api_key: str
+
+
+class HealthCheckResponse(BaseModel):
+    status: Literal["ok", "degraded"]
+    service: str
+    sdk_configured: bool
+    lifeline_upstream_reachable: bool
+
+
+class DynamicAnalyzeResponse(BaseModel):
+    status: Literal["success"]
+    description: str
+    raw_result: Any
+
+
+class ChatHistoryMessage(BaseModel):
+    role: Literal["user", "ai"]
+    content: str
+
+
+class ChatEcgRequest(BaseModel):
+    description: str
+    prompt: str
+    previous_messages: list[ChatHistoryMessage] = Field(default_factory=list)
+
+
+class ChatEcgResponse(BaseModel):
+    status: Literal["success"]
+    answer: str

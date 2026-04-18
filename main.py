@@ -1,12 +1,22 @@
 import os
+import time
 from typing import Optional
 from urllib.parse import urlparse
+import logging
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.schemas import AnalyzeEcgResponse, GenerateApiKeyResponse
+from app.logging_config import configure_logging
+from app.schemas import (
+    AnalyzeEcgResponse,
+    ChatEcgRequest,
+    ChatEcgResponse,
+    DynamicAnalyzeResponse,
+    GenerateApiKeyResponse,
+    HealthCheckResponse,
+)
 from app.services.vlm_client import (
     LifelineClientRequestError,
     LifelineSDKClient,
@@ -15,6 +25,9 @@ from app.services.vlm_client import (
 
 MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
+
+configure_logging()
+logger = logging.getLogger("lifeline.api")
 
 
 def _parse_csv_env(name: str, default: str) -> list[str]:
@@ -57,9 +70,46 @@ app.add_middleware(
 vlm_client = LifelineSDKClient()
 
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    started_at = time.perf_counter()
+    client_host = request.client.host if request.client else "unknown"
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        logger.exception(
+            "request_failed method=%s path=%s client=%s duration_ms=%.2f",
+            request.method,
+            request.url.path,
+            client_host,
+            elapsed_ms,
+        )
+        raise
+
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    logger.info(
+        "request_completed method=%s path=%s status=%s client=%s duration_ms=%.2f",
+        request.method,
+        request.url.path,
+        response.status_code,
+        client_host,
+        elapsed_ms,
+    )
+    return response
+
+
 @app.exception_handler(HTTPException)
 async def handle_http_exception(request: Request, exc: HTTPException):
     message = exc.detail if isinstance(exc.detail, str) else "Request failed"
+    logger.warning(
+        "http_exception method=%s path=%s status=%s message=%s",
+        request.method,
+        request.url.path,
+        exc.status_code,
+        message,
+    )
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -74,6 +124,11 @@ async def handle_http_exception(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def handle_unexpected_exception(request: Request, exc: Exception):
+    logger.exception(
+        "unexpected_exception method=%s path=%s",
+        request.method,
+        request.url.path,
+    )
     return JSONResponse(
         status_code=500,
         content={
@@ -91,9 +146,28 @@ def _is_valid_http_url(value: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-@app.get("/health")
-def health_check() -> dict:
-    return {"status": "ok"}
+def _result_to_text(result: object) -> str:
+    if isinstance(result, str):
+        return result
+    if isinstance(result, dict):
+        for key in ("response", "answer", "diagnosis", "summary", "text", "message"):
+            value = result.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return str(result)
+    return str(result)
+
+
+@app.get("/health", response_model=HealthCheckResponse)
+def health_check() -> HealthCheckResponse:
+    status_payload = vlm_client.health_status()
+    logger.info(
+        "health_check status=%s sdk_configured=%s lifeline_upstream_reachable=%s",
+        status_payload["status"],
+        status_payload["sdk_configured"],
+        status_payload["lifeline_upstream_reachable"],
+    )
+    return HealthCheckResponse(**status_payload)
 
 
 @app.post("/analyze-ecg", response_model=AnalyzeEcgResponse)
@@ -200,3 +274,108 @@ def generate_api_key() -> GenerateApiKeyResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return GenerateApiKeyResponse(status="success", api_key=api_key)
+
+
+@app.post("/analyze-ecg-dynamic", response_model=DynamicAnalyzeResponse)
+async def analyze_ecg_dynamic(
+    request: Request,
+    prompt_form: Optional[str] = Form(default=None, alias="prompt"),
+    context_form: Optional[str] = Form(default=None, alias="context"),
+    image_file: Optional[UploadFile] = File(default=None),
+    image_url_form: Optional[str] = Form(default=None, alias="image_url"),
+) -> DynamicAnalyzeResponse:
+    prompt = prompt_form
+    context = context_form
+    image_url = image_url_form
+
+    if request.headers.get("content-type", "").startswith("application/json"):
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Invalid JSON payload")
+        raw_prompt = payload.get("prompt")
+        raw_context = payload.get("context")
+        raw_image_url = payload.get("image_url")
+        prompt = raw_prompt if isinstance(raw_prompt, str) else None
+        context = raw_context if isinstance(raw_context, str) else None
+        image_url = raw_image_url if isinstance(raw_image_url, str) else None
+
+    if not prompt or not prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt is required")
+
+    image_bytes = None
+    mime_type = None
+
+    if image_file is not None:
+        if image_file.content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(
+                status_code=415,
+                detail="Unsupported image type. Use PNG, JPG, JPEG, or WEBP.",
+            )
+        image_bytes = await image_file.read(MAX_IMAGE_SIZE_BYTES + 1)
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="Empty image file")
+        if len(image_bytes) > MAX_IMAGE_SIZE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Image file exceeds 5MB size limit",
+            )
+        mime_type = image_file.content_type
+
+    if image_url and not _is_valid_http_url(image_url):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid image_url. Use an absolute HTTP/HTTPS URL.",
+        )
+
+    try:
+        raw_result = vlm_client.analyze_dynamic(
+            prompt=prompt,
+            context=context,
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+            image_url=image_url,
+        )
+    except LifelineServiceUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LifelineClientRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return DynamicAnalyzeResponse(
+        status="success",
+        description=_result_to_text(raw_result),
+        raw_result=raw_result,
+    )
+
+
+@app.post("/chat-ecg", response_model=ChatEcgResponse)
+def chat_ecg(payload: ChatEcgRequest) -> ChatEcgResponse:
+    last_two_messages = payload.previous_messages[-2:]
+
+    labelled_history = "\n".join(
+        [
+            f"PREVIOUS_MESSAGE_{index + 1}_{message.role.upper()}: {message.content}"
+            for index, message in enumerate(last_two_messages)
+        ]
+    )
+    if not labelled_history:
+        labelled_history = "PREVIOUS_MESSAGE_1_NONE: No prior conversation context"
+
+    labelled_prompt = (
+        "You are continuing an ECG discussion. Use the provided context and answer clearly.\n\n"
+        f"GENERATED_ECG_DESCRIPTION: {payload.description}\n"
+        f"NEW_USER_PROMPT: {payload.prompt}\n"
+        f"{labelled_history}"
+    )
+
+    try:
+        raw_result = vlm_client.analyze_dynamic(prompt=labelled_prompt)
+    except LifelineServiceUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LifelineClientRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ChatEcgResponse(status="success", answer=_result_to_text(raw_result))

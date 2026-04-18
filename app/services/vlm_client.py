@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import logging
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
@@ -10,6 +11,8 @@ from lifelinecg_sdk import LifelineClient
 DEFAULT_SDK_BASE_URL = os.getenv("LIFELINE_SDK_BASE_URL", "https://asad999-lifelineopenapi.hf.space")
 DEFAULT_GENERATE_API_EMAIL = os.getenv("LIFELINE_GENERATE_API_EMAIL", "asadirfan7533@gmail.com")
 DEFAULT_GENERATE_ADMIN_SECRET = os.getenv("LIFELINE_ADMIN_SECRET", "lifelineasad9009")
+
+logger = logging.getLogger("lifeline.api.vlm_client")
 
 
 class LifelineServiceUnavailableError(RuntimeError):
@@ -25,7 +28,7 @@ class LifelineSDKClient:
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
         self.base_url = base_url or DEFAULT_SDK_BASE_URL
-        resolved_api_key = api_key or os.getenv("LIFELINE_SDK_API_KEY")
+        resolved_api_key = "dasa_59923860079741669403" or os.getenv("LIFELINE_SDK_API_KEY")
         self.client = (
             LifelineClient(api_key=resolved_api_key, base_url=self.base_url)
             if resolved_api_key
@@ -35,6 +38,21 @@ class LifelineSDKClient:
     @property
     def can_analyze(self) -> bool:
         return self.client is not None
+
+    def health_status(self) -> dict:
+        upstream_reachable = _is_upstream_reachable(self.base_url)
+        logger.info(
+            "vlm_health_check sdk_configured=%s upstream_reachable=%s base_url=%s",
+            self.can_analyze,
+            upstream_reachable,
+            self.base_url,
+        )
+        return {
+            "status": "ok" if upstream_reachable else "degraded",
+            "service": "lifeline-api",
+            "sdk_configured": self.can_analyze,
+            "lifeline_upstream_reachable": upstream_reachable,
+        }
 
     def analyze_from_file(self, image_bytes: bytes, mime_type: str) -> dict:
         if self.client is None:
@@ -51,6 +69,7 @@ class LifelineSDKClient:
         try:
             sdk_result = self.client.analyze(temp_path)
         except Exception as exc:
+            logger.warning("analyze_from_file failed: %s", str(exc))
             if _is_upstream_offline_error(exc):
                 raise LifelineServiceUnavailableError(
                     "Lifeline service is temporarily unavailable. Please try again shortly."
@@ -89,6 +108,7 @@ class LifelineSDKClient:
         try:
             sdk_result = self.client.analyze(temp_path)
         except Exception as exc:
+            logger.warning("analyze_from_url failed: %s", str(exc))
             if _is_upstream_offline_error(exc):
                 raise LifelineServiceUnavailableError(
                     "Lifeline service is temporarily unavailable. Please try again shortly."
@@ -101,6 +121,67 @@ class LifelineSDKClient:
                 pass
 
         return _normalize_sdk_result(sdk_result)
+
+    def analyze_dynamic(
+        self,
+        prompt: str,
+        context: str | None = None,
+        image_bytes: bytes | None = None,
+        mime_type: str | None = None,
+        image_url: str | None = None,
+    ) -> object:
+        if self.client is None:
+            raise ValueError("LIFELINE_SDK_API_KEY is required for ECG analysis")
+
+        if not prompt or not prompt.strip():
+            raise ValueError("Prompt is required for dynamic analysis")
+
+        resolved_image_bytes = image_bytes
+        resolved_mime_type = mime_type or "image/png"
+
+        if image_url and resolved_image_bytes is None:
+            try:
+                with urlopen(image_url, timeout=20) as response:
+                    resolved_image_bytes = response.read()
+            except Exception as exc:
+                raise ValueError("Failed to fetch image from URL") from exc
+
+        temp_path: str | None = None
+        if resolved_image_bytes is not None:
+            suffix = _suffix_for_mime_type(resolved_mime_type)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+                temp_file.write(resolved_image_bytes)
+                temp_path = temp_file.name
+
+        try:
+            kwargs = {"prompt": prompt}
+            if context:
+                kwargs["context"] = context
+            if temp_path:
+                kwargs["image_path"] = temp_path
+
+            try:
+                return self.client.analyze_dynamic(**kwargs)
+            except TypeError:
+                # Backward compatibility with positional SDK signatures.
+                if temp_path and context:
+                    return self.client.analyze_dynamic(prompt, temp_path, context)
+                if temp_path:
+                    return self.client.analyze_dynamic(prompt, temp_path)
+                return self.client.analyze_dynamic(prompt)
+        except Exception as exc:
+            logger.warning("analyze_dynamic failed: %s", str(exc))
+            if _is_upstream_offline_error(exc):
+                raise LifelineServiceUnavailableError(
+                    "Lifeline service is temporarily unavailable. Please try again shortly."
+                ) from exc
+            raise LifelineClientRequestError("Failed to run dynamic ECG analysis") from exc
+        finally:
+            if temp_path:
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
 
     def generate_api_key(self) -> str:
         client = LifelineClient(base_url=self.base_url)
@@ -123,6 +204,7 @@ class LifelineSDKClient:
                     ) from exc
                 raise LifelineClientRequestError("Failed to generate API key from Lifeline service") from exc
         except Exception as exc:
+            logger.warning("generate_api_key failed: %s", str(exc))
             if _is_upstream_offline_error(exc):
                 raise LifelineServiceUnavailableError(
                     "Lifeline service is temporarily unavailable. Please try again shortly."
@@ -232,3 +314,12 @@ def _is_upstream_offline_error(exc: Exception) -> bool:
         "503",
     )
     return any(marker in message for marker in offline_markers)
+
+
+def _is_upstream_reachable(base_url: str) -> bool:
+    try:
+        with urlopen(base_url, timeout=5) as response:
+            return 200 <= response.status < 500
+    except Exception as exc:
+        logger.debug("upstream reachability check failed: %s", str(exc))
+        return False
