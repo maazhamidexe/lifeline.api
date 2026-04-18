@@ -13,10 +13,12 @@ from app.schemas import (
     ChatEcgRequest,
     ChatEcgResponse,
     DynamicAnalyzeResponse,
+    GenerateApiKeyRequest,
     GenerateApiKeyResponse,
     HealthCheckResponse,
 )
 from app.services.vlm_client import (
+    DEFAULT_GENERATE_API_EMAIL,
     LifelineAuthenticationError,
     LifelineClientRequestError,
     LifelineSdkVersionError,
@@ -270,9 +272,13 @@ async def analyze_ecg(
 
 
 @app.post("/generate-api-key", response_model=GenerateApiKeyResponse)
-def generate_api_key() -> GenerateApiKeyResponse:
+def generate_api_key(payload: Optional[GenerateApiKeyRequest] = None) -> GenerateApiKeyResponse:
+    email = (payload.email if payload and payload.email else "").strip()
+    if not email:
+        email = DEFAULT_GENERATE_API_EMAIL
+
     try:
-        api_key = vlm_client.generate_api_key()
+        api_key = vlm_client.generate_api_key(email=email)
     except LifelineServiceUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except LifelineValidationError as exc:

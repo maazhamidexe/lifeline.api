@@ -242,18 +242,18 @@ class LifelineSDKClient:
                 except OSError:
                     pass
 
-    def generate_api_key(self) -> str:
+    def generate_api_key(self, email: str = DEFAULT_GENERATE_API_EMAIL) -> str:
         client = LifelineClient(base_url=self.base_url)
         try:
             sdk_result = client.generate_api_key(
-                email=DEFAULT_GENERATE_API_EMAIL,
+                email=email,
                 admin_secret=DEFAULT_GENERATE_ADMIN_SECRET,
             )
         except TypeError:
             # Backward compatibility for SDK signatures that still expect positional args.
             try:
                 sdk_result = client.generate_api_key(
-                    DEFAULT_GENERATE_API_EMAIL,
+                    email,
                     DEFAULT_GENERATE_ADMIN_SECRET,
                 )
             except Exception as exc:

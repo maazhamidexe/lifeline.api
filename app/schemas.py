@@ -20,6 +20,10 @@ class GenerateApiKeyResponse(BaseModel):
     api_key: str
 
 
+class GenerateApiKeyRequest(BaseModel):
+    email: str
+
+
 class HealthCheckResponse(BaseModel):
     status: Literal["ok", "degraded"]
     service: str
