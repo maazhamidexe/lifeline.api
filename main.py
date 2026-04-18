@@ -1,3 +1,4 @@
+import os
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -5,19 +6,51 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.schemas import AnalyzeEcgResponse, GenerateApiKeyResponse
-from app.services.vlm_client import LifelineSDKClient
+from app.services.vlm_client import (
+    LifelineClientRequestError,
+    LifelineSDKClient,
+    LifelineServiceUnavailableError,
+)
 
 MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
+
+
+def _parse_csv_env(name: str, default: str) -> list[str]:
+    raw_value = os.getenv(name, default)
+    return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+
+def _parse_bool_env(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+CORS_ALLOW_ORIGINS = _parse_csv_env("CORS_ALLOW_ORIGINS", "*")
+CORS_ALLOW_METHODS = _parse_csv_env("CORS_ALLOW_METHODS", "*")
+CORS_ALLOW_HEADERS = _parse_csv_env("CORS_ALLOW_HEADERS", "*")
+CORS_EXPOSE_HEADERS = _parse_csv_env("CORS_EXPOSE_HEADERS", "")
+CORS_MAX_AGE_SECONDS = int(os.getenv("CORS_MAX_AGE_SECONDS", "600"))
+
+# Star origin cannot be combined with credentialed requests in browsers.
+CORS_ALLOW_CREDENTIALS = (
+    False
+    if "*" in CORS_ALLOW_ORIGINS
+    else _parse_bool_env("CORS_ALLOW_CREDENTIALS", True)
+)
 
 app = FastAPI(title="Lifeline AI API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=CORS_ALLOW_ORIGINS,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
+    allow_methods=CORS_ALLOW_METHODS,
+    allow_headers=CORS_ALLOW_HEADERS,
+    expose_headers=CORS_EXPOSE_HEADERS,
+    max_age=CORS_MAX_AGE_SECONDS,
 )
 
 vlm_client = LifelineSDKClient()
@@ -121,6 +154,10 @@ async def analyze_ecg(
                 image_bytes=image_bytes,
                 mime_type=image_file.content_type,
             )
+        except LifelineServiceUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except LifelineClientRequestError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -140,6 +177,10 @@ async def analyze_ecg(
 
     try:
         result = vlm_client.analyze_from_url(image_url)
+    except LifelineServiceUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LifelineClientRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -150,6 +191,10 @@ async def analyze_ecg(
 def generate_api_key() -> GenerateApiKeyResponse:
     try:
         api_key = vlm_client.generate_api_key()
+    except LifelineServiceUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LifelineClientRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

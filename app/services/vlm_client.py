@@ -5,18 +5,32 @@ import tempfile
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
-from lifelinecg_sdk.client import LifelineClient
+from lifelinecg_sdk import LifelineClient
 
-HARDCODED_GENERATE_API_EMAIL = "asadirfan7533@gmail.com"
-HARDCODED_GENERATE_API_PASSWORD = "lifelineasad9009"
+DEFAULT_SDK_BASE_URL = os.getenv("LIFELINE_SDK_BASE_URL", "https://asad999-lifelineopenapi.hf.space")
+DEFAULT_GENERATE_API_EMAIL = os.getenv("LIFELINE_GENERATE_API_EMAIL", "asadirfan7533@gmail.com")
+DEFAULT_GENERATE_ADMIN_SECRET = os.getenv("LIFELINE_ADMIN_SECRET", "lifelineasad9009")
+
+
+class LifelineServiceUnavailableError(RuntimeError):
+    """Raised when the upstream Lifeline service is unreachable or down."""
+
+
+class LifelineClientRequestError(ValueError):
+    """Raised when the upstream request fails for a non-outage reason."""
 
 
 class LifelineSDKClient:
     model_name = "lifelinecg-sdk"
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
+        self.base_url = base_url or DEFAULT_SDK_BASE_URL
         resolved_api_key = api_key or os.getenv("LIFELINE_SDK_API_KEY")
-        self.client = LifelineClient(api_key=resolved_api_key) if resolved_api_key else None
+        self.client = (
+            LifelineClient(api_key=resolved_api_key, base_url=self.base_url)
+            if resolved_api_key
+            else None
+        )
 
     @property
     def can_analyze(self) -> bool:
@@ -36,6 +50,12 @@ class LifelineSDKClient:
 
         try:
             sdk_result = self.client.analyze(temp_path)
+        except Exception as exc:
+            if _is_upstream_offline_error(exc):
+                raise LifelineServiceUnavailableError(
+                    "Lifeline service is temporarily unavailable. Please try again shortly."
+                ) from exc
+            raise LifelineClientRequestError("Failed to analyze ECG using Lifeline service") from exc
         finally:
             try:
                 os.remove(temp_path)
@@ -68,6 +88,12 @@ class LifelineSDKClient:
 
         try:
             sdk_result = self.client.analyze(temp_path)
+        except Exception as exc:
+            if _is_upstream_offline_error(exc):
+                raise LifelineServiceUnavailableError(
+                    "Lifeline service is temporarily unavailable. Please try again shortly."
+                ) from exc
+            raise LifelineClientRequestError("Failed to analyze ECG using Lifeline service") from exc
         finally:
             try:
                 os.remove(temp_path)
@@ -77,14 +103,31 @@ class LifelineSDKClient:
         return _normalize_sdk_result(sdk_result)
 
     def generate_api_key(self) -> str:
-        client = LifelineClient()
+        client = LifelineClient(base_url=self.base_url)
         try:
             sdk_result = client.generate_api_key(
-                HARDCODED_GENERATE_API_EMAIL,
-                HARDCODED_GENERATE_API_PASSWORD,
+                email=DEFAULT_GENERATE_API_EMAIL,
+                admin_secret=DEFAULT_GENERATE_ADMIN_SECRET,
             )
+        except TypeError:
+            # Backward compatibility for SDK signatures that still expect positional args.
+            try:
+                sdk_result = client.generate_api_key(
+                    DEFAULT_GENERATE_API_EMAIL,
+                    DEFAULT_GENERATE_ADMIN_SECRET,
+                )
+            except Exception as exc:
+                if _is_upstream_offline_error(exc):
+                    raise LifelineServiceUnavailableError(
+                        "Lifeline service is temporarily unavailable. Please try again shortly."
+                    ) from exc
+                raise LifelineClientRequestError("Failed to generate API key from Lifeline service") from exc
         except Exception as exc:
-            raise ValueError("Failed to generate API key from Lifeline SDK") from exc
+            if _is_upstream_offline_error(exc):
+                raise LifelineServiceUnavailableError(
+                    "Lifeline service is temporarily unavailable. Please try again shortly."
+                ) from exc
+            raise LifelineClientRequestError("Failed to generate API key from Lifeline service") from exc
 
         api_key = _extract_api_key(sdk_result)
         if not api_key:
@@ -171,3 +214,21 @@ def _extract_api_key(result: object) -> str:
                 return value.strip()
 
     return ""
+
+
+def _is_upstream_offline_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    offline_markers = (
+        "connection",
+        "timeout",
+        "timed out",
+        "service unavailable",
+        "temporarily unavailable",
+        "unreachable",
+        "failed to establish a new connection",
+        "max retries exceeded",
+        "name or service not known",
+        "nodename nor servname provided",
+        "503",
+    )
+    return any(marker in message for marker in offline_markers)
