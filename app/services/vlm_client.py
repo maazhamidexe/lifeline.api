@@ -80,26 +80,33 @@ class LifelineSDKClient:
             temp_path = temp_file.name
 
         try:
-            # Use analyze_dynamic instead of analyze() for better compatibility
-            # The old analyze() endpoint has issues, but analyze_dynamic() works reliably
-            sdk_result = self.client.analyze_dynamic(
-                prompt="Analyze this ECG image and provide diagnosis and findings.",
-                image_path=temp_path,
-            )
-            
-            # Extract text from the dynamic response
-            description = _dynamic_result_to_text(sdk_result)
-            
-            # Convert to the expected response format
-            return {
-                "status": "success",
-                "analysis": {
-                    "diagnosis": description,
-                    "confidence": 0.85,  # Dynamic endpoint doesn't provide confidence
-                    "findings": ["See diagnosis for details."],
-                    "recommendation": "Please consult a clinician for full interpretation.",
-                },
-            }
+            # Try analyze_dynamic first if available (newer SDK versions)
+            if hasattr(self.client, "analyze_dynamic"):
+                logger.info("Using analyze_dynamic method")
+                sdk_result = self.client.analyze_dynamic(
+                    prompt="Analyze this ECG image and provide diagnosis and findings.",
+                    image_path=temp_path,
+                )
+                description = _dynamic_result_to_text(sdk_result)
+                return {
+                    "status": "success",
+                    "analysis": {
+                        "diagnosis": description,
+                        "confidence": 0.85,
+                        "findings": ["See diagnosis for details."],
+                        "recommendation": "Please consult a clinician for full interpretation.",
+                    },
+                }
+            else:
+                # Fall back to analyze() for older SDK versions
+                logger.info("Using analyze method (analyze_dynamic not available)")
+                sdk_result = self.client.analyze(temp_path)
+                normalized_result = _normalize_sdk_result(sdk_result)
+                return _enhance_analysis_with_dynamic_fallback(
+                    client=self.client,
+                    temp_path=temp_path,
+                    normalized_result=normalized_result,
+                )
         except Exception as exc:
             logger.warning("analyze_from_file failed: %s", str(exc))
             _raise_classified_upstream_error(exc, operation="analyze")
@@ -134,26 +141,33 @@ class LifelineSDKClient:
             temp_path = temp_file.name
 
         try:
-            # Use analyze_dynamic instead of analyze() for better compatibility
-            # The old analyze() endpoint has issues, but analyze_dynamic() works reliably
-            sdk_result = self.client.analyze_dynamic(
-                prompt="Analyze this ECG image and provide diagnosis and findings.",
-                image_path=temp_path,
-            )
-            
-            # Extract text from the dynamic response
-            description = _dynamic_result_to_text(sdk_result)
-            
-            # Convert to the expected response format
-            return {
-                "status": "success",
-                "analysis": {
-                    "diagnosis": description,
-                    "confidence": 0.85,  # Dynamic endpoint doesn't provide confidence
-                    "findings": ["See diagnosis for details."],
-                    "recommendation": "Please consult a clinician for full interpretation.",
-                },
-            }
+            # Try analyze_dynamic first if available (newer SDK versions)
+            if hasattr(self.client, "analyze_dynamic"):
+                logger.info("Using analyze_dynamic method")
+                sdk_result = self.client.analyze_dynamic(
+                    prompt="Analyze this ECG image and provide diagnosis and findings.",
+                    image_path=temp_path,
+                )
+                description = _dynamic_result_to_text(sdk_result)
+                return {
+                    "status": "success",
+                    "analysis": {
+                        "diagnosis": description,
+                        "confidence": 0.85,
+                        "findings": ["See diagnosis for details."],
+                        "recommendation": "Please consult a clinician for full interpretation.",
+                    },
+                }
+            else:
+                # Fall back to analyze() for older SDK versions
+                logger.info("Using analyze method (analyze_dynamic not available)")
+                sdk_result = self.client.analyze(temp_path)
+                normalized_result = _normalize_sdk_result(sdk_result)
+                return _enhance_analysis_with_dynamic_fallback(
+                    client=self.client,
+                    temp_path=temp_path,
+                    normalized_result=normalized_result,
+                )
         except Exception as exc:
             logger.warning("analyze_from_url failed: %s", str(exc))
             _raise_classified_upstream_error(exc, operation="analyze")
