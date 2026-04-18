@@ -132,13 +132,28 @@ def _is_valid_http_url(value: str) -> bool:
 
 def _result_to_text(result: object) -> str:
     if isinstance(result, str):
-        return result
+        text = result.strip()
+        return text if text else "Analysis completed."
+    
     if isinstance(result, dict):
-        for key in ("response", "answer", "diagnosis", "summary", "text", "message"):
+        # Check for Lifeline's response format
+        for key in (
+            "final_report",
+            "response",
+            "answer",
+            "diagnosis",
+            "summary",
+            "description",
+            "generated_description",
+            "text",
+            "message",
+        ):
             value = result.get(key)
             if isinstance(value, str) and value.strip():
-                return value.strip()
+                text = value.strip()
+                return text if text else "Analysis completed."
         return str(result)
+    
     return str(result)
 
 
@@ -344,9 +359,16 @@ async def analyze_ecg_dynamic(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    description_text = _result_to_text(raw_result)
+    logger.info(
+        "analyze_dynamic_completed raw_result_type=%s description_length=%d",
+        type(raw_result).__name__,
+        len(description_text),
+    )
+    
     return DynamicAnalyzeResponse(
         status="success",
-        description=_result_to_text(raw_result),
+        description=description_text,
         raw_result=raw_result,
     )
 

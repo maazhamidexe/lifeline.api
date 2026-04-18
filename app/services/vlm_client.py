@@ -242,14 +242,14 @@ def _suffix_for_mime_type(mime_type: str) -> str:
 
 def _normalize_sdk_result(result: object) -> dict:
     if isinstance(result, dict):
-        # Pass through already normalized payloads.
+        # Pass through already normalized payloads only when diagnosis is meaningful.
         if "status" in result and "analysis" in result and isinstance(result.get("analysis"), dict):
             analysis_obj = result["analysis"]
             diagnosis = _extract_first_string(
                 analysis_obj,
                 ("diagnosis", "summary", "description", "impression", "report", "text"),
             )
-            if diagnosis:
+            if diagnosis and not _is_placeholder_diagnosis(diagnosis):
                 return result
 
         diagnosis = _extract_first_string(
@@ -272,7 +272,12 @@ def _normalize_sdk_result(result: object) -> dict:
         confidence_raw = _extract_first_value(result, ("confidence", "score", "probability"), default=0.0)
         confidence = _to_confidence(confidence_raw)
 
-        findings = _extract_string_list(result, ("findings", "abnormalities", "observations"))
+        findings = _extract_string_list(result, ("findings", "abnormalities", "observations", "conditions"))
+
+        # Some upstream payloads expose only a list of conditions.
+        if _is_placeholder_diagnosis(diagnosis) and findings:
+            diagnosis = "; ".join(findings[:3])
+
         if not findings:
             findings_text = _extract_first_string(result, ("findings_text", "observations_text"))
             if findings_text:
@@ -396,10 +401,14 @@ def _is_placeholder_diagnosis(value: str) -> bool:
 
 def _dynamic_result_to_text(result: object) -> str:
     if isinstance(result, str):
-        return result.strip()
+        text = result.strip()
+        if text:
+            return text
 
     if isinstance(result, dict):
+        # Check for explicit fields in order of priority
         for key in (
+            "final_report",  # New Lifeline SDK response format
             "diagnosis",
             "summary",
             "description",
@@ -412,10 +421,15 @@ def _dynamic_result_to_text(result: object) -> str:
         ):
             value = result.get(key)
             if isinstance(value, str) and value.strip():
-                return value.strip()
+                text = value.strip()
+                if not _is_placeholder_diagnosis(text):
+                    return text
 
     rendered = str(result).strip()
-    return rendered
+    if rendered and not _is_placeholder_diagnosis(rendered):
+        return rendered
+    
+    return "Analysis completed. Please consult with a healthcare provider for full ECG interpretation."
 
 
 def _enhance_analysis_with_dynamic_fallback(
