@@ -19,6 +19,7 @@ from app.schemas import (
 from app.services.vlm_client import (
     LifelineAuthenticationError,
     LifelineClientRequestError,
+    LifelineSdkVersionError,
     LifelineSDKClient,
     LifelineServiceUnavailableError,
     LifelineValidationError,
@@ -330,6 +331,8 @@ async def analyze_ecg_dynamic(
             mime_type=mime_type,
             image_url=image_url,
         )
+    except LifelineSdkVersionError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
     except LifelineServiceUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except LifelineValidationError as exc:
@@ -370,6 +373,8 @@ def chat_ecg(payload: ChatEcgRequest) -> ChatEcgResponse:
 
     try:
         raw_result = vlm_client.analyze_dynamic(prompt=labelled_prompt)
+    except LifelineSdkVersionError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
     except LifelineServiceUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except LifelineValidationError as exc:
