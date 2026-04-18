@@ -1,4 +1,3 @@
-import os
 import time
 from typing import Optional
 from urllib.parse import urlparse
@@ -18,6 +17,7 @@ from app.schemas import (
     HealthCheckResponse,
 )
 from app.services.vlm_client import (
+    LifelineAuthenticationError,
     LifelineClientRequestError,
     LifelineSDKClient,
     LifelineServiceUnavailableError,
@@ -29,31 +29,13 @@ ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
 configure_logging()
 logger = logging.getLogger("lifeline.api")
 
-
-def _parse_csv_env(name: str, default: str) -> list[str]:
-    raw_value = os.getenv(name, default)
-    return [item.strip() for item in raw_value.split(",") if item.strip()]
-
-
-def _parse_bool_env(name: str, default: bool) -> bool:
-    raw_value = os.getenv(name)
-    if raw_value is None:
-        return default
-    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-CORS_ALLOW_ORIGINS = _parse_csv_env("CORS_ALLOW_ORIGINS", "*")
-CORS_ALLOW_METHODS = _parse_csv_env("CORS_ALLOW_METHODS", "*")
-CORS_ALLOW_HEADERS = _parse_csv_env("CORS_ALLOW_HEADERS", "*")
-CORS_EXPOSE_HEADERS = _parse_csv_env("CORS_EXPOSE_HEADERS", "")
-CORS_MAX_AGE_SECONDS = int(os.getenv("CORS_MAX_AGE_SECONDS", "600"))
-
-# Star origin cannot be combined with credentialed requests in browsers.
-CORS_ALLOW_CREDENTIALS = (
-    False
-    if "*" in CORS_ALLOW_ORIGINS
-    else _parse_bool_env("CORS_ALLOW_CREDENTIALS", True)
-)
+CORS_ALLOW_ORIGINS = ["*"]
+CORS_ALLOW_METHODS = ["*"]
+CORS_ALLOW_HEADERS = ["*"]
+CORS_EXPOSE_HEADERS: list[str] = []
+CORS_MAX_AGE_SECONDS = 600
+# With wildcard origins, credentials must be false.
+CORS_ALLOW_CREDENTIALS = False
 
 app = FastAPI(title="Lifeline AI API", version="0.1.0")
 
@@ -231,6 +213,8 @@ async def analyze_ecg(
             )
         except LifelineServiceUnavailableError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except LifelineAuthenticationError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
         except LifelineClientRequestError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except ValueError as exc:
@@ -254,6 +238,8 @@ async def analyze_ecg(
         result = vlm_client.analyze_from_url(image_url)
     except LifelineServiceUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LifelineAuthenticationError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     except LifelineClientRequestError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
@@ -268,6 +254,8 @@ def generate_api_key() -> GenerateApiKeyResponse:
         api_key = vlm_client.generate_api_key()
     except LifelineServiceUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LifelineAuthenticationError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     except LifelineClientRequestError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
@@ -337,6 +325,8 @@ async def analyze_ecg_dynamic(
         )
     except LifelineServiceUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LifelineAuthenticationError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     except LifelineClientRequestError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
@@ -373,6 +363,8 @@ def chat_ecg(payload: ChatEcgRequest) -> ChatEcgResponse:
         raw_result = vlm_client.analyze_dynamic(prompt=labelled_prompt)
     except LifelineServiceUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LifelineAuthenticationError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     except LifelineClientRequestError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:

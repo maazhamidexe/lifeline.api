@@ -1,13 +1,9 @@
 import logging
-import os
 
 
 def configure_logging() -> None:
-    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-    log_format = os.getenv(
-        "LOG_FORMAT",
-        "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    )
+    log_level = "INFO"
+    log_format = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 
     logging.basicConfig(
         level=getattr(logging, log_level, logging.INFO),
