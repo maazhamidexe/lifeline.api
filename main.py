@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -98,8 +99,8 @@ def health_check() -> dict:
 @app.post("/analyze-ecg", response_model=AnalyzeEcgResponse)
 async def analyze_ecg(
     request: Request,
-    image_file: UploadFile | None = File(default=None),
-    image_url_form: str | None = Form(default=None, alias="image_url"),
+    image_file: Optional[UploadFile] = File(default=None),
+    image_url_form: Optional[str] = Form(default=None, alias="image_url"),
 ) -> AnalyzeEcgResponse:
     if not vlm_client.can_analyze:
         raise HTTPException(
