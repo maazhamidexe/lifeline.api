@@ -81,6 +81,12 @@ class LifelineSDKClient:
 
         try:
             sdk_result = self.client.analyze(temp_path)
+            normalized_result = _normalize_sdk_result(sdk_result)
+            return _enhance_analysis_with_dynamic_fallback(
+                client=self.client,
+                temp_path=temp_path,
+                normalized_result=normalized_result,
+            )
         except Exception as exc:
             logger.warning("analyze_from_file failed: %s", str(exc))
             _raise_classified_upstream_error(exc, operation="analyze")
@@ -90,7 +96,7 @@ class LifelineSDKClient:
             except OSError:
                 pass
 
-        return _normalize_sdk_result(sdk_result)
+        raise LifelineClientRequestError("Failed to analyze ECG using Lifeline service")
 
     def analyze_from_url(self, image_url: str) -> dict:
         if self.client is None:
@@ -116,6 +122,12 @@ class LifelineSDKClient:
 
         try:
             sdk_result = self.client.analyze(temp_path)
+            normalized_result = _normalize_sdk_result(sdk_result)
+            return _enhance_analysis_with_dynamic_fallback(
+                client=self.client,
+                temp_path=temp_path,
+                normalized_result=normalized_result,
+            )
         except Exception as exc:
             logger.warning("analyze_from_url failed: %s", str(exc))
             _raise_classified_upstream_error(exc, operation="analyze")
@@ -125,7 +137,7 @@ class LifelineSDKClient:
             except OSError:
                 pass
 
-        return _normalize_sdk_result(sdk_result)
+        raise LifelineClientRequestError("Failed to analyze ECG using Lifeline service")
 
     def analyze_dynamic(
         self,
@@ -367,6 +379,76 @@ def _extract_api_key(result: object) -> str:
                 return value.strip()
 
     return ""
+
+
+def _is_placeholder_diagnosis(value: str) -> bool:
+    normalized = value.strip().lower()
+    placeholders = {
+        "",
+        "no diagnosis provided",
+        "analysis completed.",
+        "analysis completed",
+        "n/a",
+        "none",
+    }
+    return normalized in placeholders
+
+
+def _dynamic_result_to_text(result: object) -> str:
+    if isinstance(result, str):
+        return result.strip()
+
+    if isinstance(result, dict):
+        for key in (
+            "diagnosis",
+            "summary",
+            "description",
+            "generated_description",
+            "response",
+            "answer",
+            "text",
+            "message",
+            "report",
+        ):
+            value = result.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+    rendered = str(result).strip()
+    return rendered
+
+
+def _enhance_analysis_with_dynamic_fallback(
+    client: LifelineClient,
+    temp_path: str,
+    normalized_result: dict,
+) -> dict:
+    analysis = normalized_result.get("analysis") if isinstance(normalized_result, dict) else None
+    if not isinstance(analysis, dict):
+        return normalized_result
+
+    diagnosis = str(analysis.get("diagnosis") or "")
+    if not _is_placeholder_diagnosis(diagnosis):
+        return normalized_result
+
+    if not hasattr(client, "analyze_dynamic"):
+        return normalized_result
+
+    try:
+        dynamic_result = client.analyze_dynamic(
+            prompt="Provide a concise ECG diagnosis and key findings from this image.",
+            image_path=temp_path,
+        )
+        dynamic_text = _dynamic_result_to_text(dynamic_result)
+        if dynamic_text and not _is_placeholder_diagnosis(dynamic_text):
+            analysis["diagnosis"] = dynamic_text
+            findings = analysis.get("findings")
+            if findings == ["No major findings detected."]:
+                analysis["findings"] = ["See diagnosis for details."]
+    except Exception as exc:
+        logger.info("dynamic fallback after analyze returned no enrichment: %s", str(exc))
+
+    return normalized_result
 
 
 def _is_upstream_offline_error(exc: Exception) -> bool:
