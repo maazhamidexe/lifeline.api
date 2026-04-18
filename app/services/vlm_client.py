@@ -11,6 +11,7 @@ from lifelinecg_sdk import LifelineClient
 DEFAULT_SDK_BASE_URL = os.getenv("LIFELINE_SDK_BASE_URL", "https://asad999-lifelineopenapi.hf.space")
 DEFAULT_GENERATE_API_EMAIL = os.getenv("LIFELINE_GENERATE_API_EMAIL", "asadirfan7533@gmail.com")
 DEFAULT_GENERATE_ADMIN_SECRET = os.getenv("LIFELINE_ADMIN_SECRET", "lifelineasad9009")
+DEFAULT_HARDCODED_SDK_API_KEY = "dasa_20550346891082275954"
 
 logger = logging.getLogger("lifeline.api.vlm_client")
 
@@ -28,7 +29,11 @@ class LifelineSDKClient:
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
         self.base_url = base_url or DEFAULT_SDK_BASE_URL
-        resolved_api_key = "dasa_59923860079741669403" or os.getenv("LIFELINE_SDK_API_KEY")
+        resolved_api_key = (
+            api_key
+            or os.getenv("LIFELINE_SDK_API_KEY")
+            or DEFAULT_HARDCODED_SDK_API_KEY
+        )
         self.client = (
             LifelineClient(api_key=resolved_api_key, base_url=self.base_url)
             if resolved_api_key
