@@ -21,6 +21,7 @@ from app.services.vlm_client import (
     LifelineClientRequestError,
     LifelineSDKClient,
     LifelineServiceUnavailableError,
+    LifelineValidationError,
 )
 
 MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
@@ -213,6 +214,8 @@ async def analyze_ecg(
             )
         except LifelineServiceUnavailableError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except LifelineValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except LifelineAuthenticationError as exc:
             raise HTTPException(status_code=401, detail=str(exc)) from exc
         except LifelineClientRequestError as exc:
@@ -238,6 +241,8 @@ async def analyze_ecg(
         result = vlm_client.analyze_from_url(image_url)
     except LifelineServiceUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LifelineValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LifelineAuthenticationError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except LifelineClientRequestError as exc:
@@ -254,6 +259,8 @@ def generate_api_key() -> GenerateApiKeyResponse:
         api_key = vlm_client.generate_api_key()
     except LifelineServiceUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LifelineValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LifelineAuthenticationError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except LifelineClientRequestError as exc:
@@ -325,6 +332,8 @@ async def analyze_ecg_dynamic(
         )
     except LifelineServiceUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LifelineValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LifelineAuthenticationError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except LifelineClientRequestError as exc:
@@ -363,6 +372,8 @@ def chat_ecg(payload: ChatEcgRequest) -> ChatEcgResponse:
         raw_result = vlm_client.analyze_dynamic(prompt=labelled_prompt)
     except LifelineServiceUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LifelineValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LifelineAuthenticationError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except LifelineClientRequestError as exc:

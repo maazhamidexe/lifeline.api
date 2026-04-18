@@ -28,6 +28,10 @@ class LifelineAuthenticationError(ValueError):
     """Raised when SDK key or admin secret is invalid/misconfigured."""
 
 
+class LifelineValidationError(ValueError):
+    """Raised when upstream rejects request payload/content (HTTP 400)."""
+
+
 class LifelineSDKClient:
     model_name = "lifelinecg-sdk"
 
@@ -323,11 +327,21 @@ def _is_upstream_auth_error(exc: Exception) -> bool:
 
 def _raise_classified_upstream_error(exc: Exception, operation: str) -> None:
     message = str(exc).lower()
+    upstream_status = _extract_upstream_status_code(exc)
+    upstream_detail = _extract_upstream_error_detail(exc)
 
     if _is_upstream_offline_error(exc):
         raise LifelineServiceUnavailableError(
             "Lifeline service is temporarily unavailable. Please try again shortly."
         ) from exc
+
+    if upstream_status == 400:
+        detail = (
+            f"Upstream Lifeline rejected the request (400). {upstream_detail}"
+            if upstream_detail
+            else "Upstream Lifeline rejected the request (400). Check ECG image format/content and retry."
+        )
+        raise LifelineValidationError(detail) from exc
 
     if _is_upstream_auth_error(exc):
         if "admin" in message and "secret" in message:
@@ -343,6 +357,41 @@ def _raise_classified_upstream_error(exc: Exception, operation: str) -> None:
     if operation == "analyze_dynamic":
         raise LifelineClientRequestError("Failed to run dynamic ECG analysis") from exc
     raise LifelineClientRequestError("Failed to analyze ECG using Lifeline service") from exc
+
+
+def _extract_upstream_status_code(exc: Exception) -> int | None:
+    response = getattr(exc, "response", None)
+    if response is None:
+        return None
+
+    status_code = getattr(response, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code
+
+    return None
+
+
+def _extract_upstream_error_detail(exc: Exception) -> str:
+    response = getattr(exc, "response", None)
+    if response is None:
+        return ""
+
+    try:
+        json_body = response.json()
+        if isinstance(json_body, dict):
+            for key in ("detail", "message", "error"):
+                value = json_body.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            return str(json_body)
+    except Exception:
+        pass
+
+    text_body = getattr(response, "text", "")
+    if isinstance(text_body, str) and text_body.strip():
+        return text_body.strip()[:400]
+
+    return ""
 
 
 def _is_upstream_reachable(base_url: str) -> bool:
