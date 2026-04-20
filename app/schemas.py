@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -15,7 +15,7 @@ class AnalyzeEcgAnalysis(BaseModel):
 class AnalyzeEcgResponse(BaseModel):
     status: Literal["success"]
     analysis: AnalyzeEcgAnalysis
-    analysis_id: str | None = None
+    analysis_id: Optional[str] = None
 
 
 class GenerateApiKeyResponse(BaseModel):
@@ -38,7 +38,7 @@ class DynamicAnalyzeResponse(BaseModel):
     status: Literal["success"]
     description: str
     raw_result: Any
-    analysis_id: str | None = None
+    analysis_id: Optional[str] = None
 
 
 class AnalysisHistoryEntry(BaseModel):
@@ -67,8 +67,8 @@ class ChatEcgRequest(BaseModel):
     description: str
     prompt: str
     previous_messages: list[ChatHistoryMessage] = Field(default_factory=list)
-    image: str | None = None
-    mime_type: str | None = None
+    image: Optional[str] = None
+    mime_type: Optional[str] = None
 
 
 class ChatEcgResponse(BaseModel):

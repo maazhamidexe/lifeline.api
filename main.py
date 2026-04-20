@@ -140,9 +140,9 @@ def _is_valid_http_url(value: str) -> bool:
 
 
 def _resolve_chat_image_payload(
-    image: str | None,
-    mime_type: str | None,
-) -> tuple[bytes | None, str | None, str | None]:
+    image: Optional[str],
+    mime_type: Optional[str],
+) -> tuple[Optional[bytes], Optional[str], Optional[str]]:
     if image is None:
         return None, None, None
 

@@ -5,6 +5,7 @@ import tempfile
 import logging
 from urllib.parse import urlparse
 from urllib.request import urlopen
+from typing import Optional
 
 from lifelinecg_sdk import LifelineClient
 
@@ -39,7 +40,7 @@ class LifelineSdkVersionError(ValueError):
 class LifelineSDKClient:
     model_name = "lifelinecg-sdk"
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None) -> None:
         self.base_url = base_url or DEFAULT_SDK_BASE_URL
         resolved_api_key = api_key or DEFAULT_HARDCODED_SDK_API_KEY
         self.client = (
@@ -182,10 +183,10 @@ class LifelineSDKClient:
     def analyze_dynamic(
         self,
         prompt: str,
-        context: str | None = None,
-        image_bytes: bytes | None = None,
-        mime_type: str | None = None,
-        image_url: str | None = None,
+        context: Optional[str] = None,
+        image_bytes: Optional[bytes] = None,
+        mime_type: Optional[str] = None,
+        image_url: Optional[str] = None,
     ) -> object:
         if self.client is None:
             raise ValueError("LIFELINE_SDK_API_KEY is required for ECG analysis")
@@ -209,7 +210,7 @@ class LifelineSDKClient:
             except Exception as exc:
                 raise ValueError("Failed to fetch image from URL") from exc
 
-        temp_path: str | None = None
+        temp_path: Optional[str] = None
         if resolved_image_bytes is not None:
             suffix = _suffix_for_mime_type(resolved_mime_type)
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
@@ -576,7 +577,7 @@ def _raise_classified_upstream_error(exc: Exception, operation: str) -> None:
     raise LifelineClientRequestError("Failed to analyze ECG using Lifeline service") from exc
 
 
-def _extract_upstream_status_code(exc: Exception) -> int | None:
+def _extract_upstream_status_code(exc: Exception) -> Optional[int]:
     response = getattr(exc, "response", None)
     if response is None:
         return None
