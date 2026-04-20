@@ -9,7 +9,7 @@ from typing import Optional
 
 from lifelinecg_sdk import LifelineClient
 
-DEFAULT_HARDCODED_SDK_API_KEY = "dasa_20550346891082275954"
+DEFAULT_HARDCODED_SDK_API_KEY = "dasa_32753404569591298172"
 DEFAULT_SDK_BASE_URL = "https://asad999-lifelineopenapi.hf.space"
 DEFAULT_GENERATE_API_EMAIL = "asadirfan7533@gmail.com"
 DEFAULT_GENERATE_ADMIN_SECRET = "lifelineasad9009"
