@@ -37,7 +37,6 @@ ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
 
 configure_logging()
 logger = logging.getLogger("lifeline.api")
-
 CORS_ALLOW_ORIGINS = ["*"]
 CORS_ALLOW_METHODS = ["*"]
 CORS_ALLOW_HEADERS = ["*"]
