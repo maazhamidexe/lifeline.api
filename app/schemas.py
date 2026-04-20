@@ -65,6 +65,8 @@ class ChatEcgRequest(BaseModel):
     description: str
     prompt: str
     previous_messages: list[ChatHistoryMessage] = Field(default_factory=list)
+    image: str | None = None
+    mime_type: str | None = None
 
 
 class ChatEcgResponse(BaseModel):

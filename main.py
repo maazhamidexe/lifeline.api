@@ -1,4 +1,6 @@
 import time
+import base64
+import binascii
 from typing import Optional
 from urllib.parse import urlparse
 import logging
@@ -134,6 +136,52 @@ async def handle_unexpected_exception(request: Request, exc: Exception):
 def _is_valid_http_url(value: str) -> bool:
     parsed = urlparse(value)
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _resolve_chat_image_payload(
+    image: str | None,
+    mime_type: str | None,
+) -> tuple[bytes | None, str | None, str | None]:
+    if image is None:
+        return None, None, None
+
+    image_value = image.strip()
+    if not image_value:
+        return None, None, None
+
+    resolved_mime_type = mime_type.strip() if mime_type else None
+    if resolved_mime_type and resolved_mime_type not in ALLOWED_IMAGE_TYPES:
+        raise ValueError("Unsupported image type. Use PNG, JPG, JPEG, or WEBP.")
+
+    if _is_valid_http_url(image_value):
+        return None, None, image_value
+
+    raw_base64 = image_value
+    if image_value.startswith("data:"):
+        try:
+            header, raw_base64 = image_value.split(",", 1)
+        except ValueError as exc:
+            raise ValueError("Invalid data URL image format") from exc
+
+        mime_candidate = header[5:].split(";", 1)[0].strip().lower()
+        if mime_candidate:
+            resolved_mime_type = mime_candidate
+
+    if resolved_mime_type and resolved_mime_type not in ALLOWED_IMAGE_TYPES:
+        raise ValueError("Unsupported image type. Use PNG, JPG, JPEG, or WEBP.")
+
+    try:
+        image_bytes = base64.b64decode(raw_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Invalid image payload. Use an HTTP/HTTPS URL or base64 image.") from exc
+
+    if not image_bytes:
+        raise ValueError("Empty image payload")
+
+    if len(image_bytes) > MAX_IMAGE_SIZE_BYTES:
+        raise ValueError("Image file exceeds 5MB size limit")
+
+    return image_bytes, resolved_mime_type, None
 
 
 def _result_to_text(result: object) -> str:
@@ -423,26 +471,35 @@ def delete_analysis_history(analysis_id: str) -> AnalysisDeleteResponse:
 
 @app.post("/chat-ecg", response_model=ChatEcgResponse)
 def chat_ecg(payload: ChatEcgRequest) -> ChatEcgResponse:
-    last_two_messages = payload.previous_messages[-2:]
+    last_few_messages = payload.previous_messages[-3:]
 
     labelled_history = "\n".join(
         [
             f"PREVIOUS_MESSAGE_{index + 1}_{message.role.upper()}: {message.content}"
-            for index, message in enumerate(last_two_messages)
+            for index, message in enumerate(last_few_messages)
         ]
     )
     if not labelled_history:
         labelled_history = "PREVIOUS_MESSAGE_1_NONE: No prior conversation context"
 
-    labelled_prompt = (
-        "You are continuing an ECG discussion. Use the provided context and answer clearly.\n\n"
+    context_text = (
         f"GENERATED_ECG_DESCRIPTION: {payload.description}\n"
-        f"NEW_USER_PROMPT: {payload.prompt}\n"
         f"{labelled_history}"
     )
 
+    image_bytes, mime_type, image_url = _resolve_chat_image_payload(
+        image=payload.image,
+        mime_type=payload.mime_type,
+    )
+
     try:
-        raw_result = vlm_client.analyze_dynamic(prompt=labelled_prompt)
+        raw_result = vlm_client.analyze_dynamic(
+            prompt=payload.prompt,
+            context=context_text,
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+            image_url=image_url,
+        )
     except LifelineSdkVersionError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
     except LifelineServiceUnavailableError as exc:
