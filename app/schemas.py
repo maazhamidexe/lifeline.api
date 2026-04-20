@@ -13,6 +13,7 @@ class AnalyzeEcgAnalysis(BaseModel):
 class AnalyzeEcgResponse(BaseModel):
     status: Literal["success"]
     analysis: AnalyzeEcgAnalysis
+    analysis_id: str | None = None
 
 
 class GenerateApiKeyResponse(BaseModel):
@@ -35,6 +36,24 @@ class DynamicAnalyzeResponse(BaseModel):
     status: Literal["success"]
     description: str
     raw_result: Any
+    analysis_id: str | None = None
+
+
+class AnalysisHistoryEntry(BaseModel):
+    analysis_id: str
+    analysis_type: Literal["analyze-ecg", "analyze-ecg-dynamic"]
+    source: Literal["file", "url", "text-only"]
+    created_at: str
+
+
+class AnalysisHistoryListResponse(BaseModel):
+    status: Literal["success"]
+    records: list[AnalysisHistoryEntry]
+
+
+class AnalysisDeleteResponse(BaseModel):
+    status: Literal["success"]
+    deleted_analysis_id: str
 
 
 class ChatHistoryMessage(BaseModel):
@@ -46,6 +65,8 @@ class ChatEcgRequest(BaseModel):
     description: str
     prompt: str
     previous_messages: list[ChatHistoryMessage] = Field(default_factory=list)
+    image: str | None = None
+    mime_type: str | None = None
 
 
 class ChatEcgResponse(BaseModel):

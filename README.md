@@ -25,6 +25,8 @@ This service handles:
 - `POST /analyze-ecg-dynamic`
 - `POST /chat-ecg`
 - `POST /generate-api-key`
+- `GET /analysis-history`
+- `DELETE /analysis-history/{analysis_id}`
 
 ## Request and Response Summary
 
@@ -119,6 +121,40 @@ Standard error shape for handled failures:
     "code": 400,
     "message": "Validation error message"
   }
+}
+```
+
+### `GET /analysis-history`
+
+- Returns recent analysis records (newest first)
+- Optional query param: `limit` (1 to 200, default 50)
+
+Success shape:
+
+```json
+{
+  "status": "success",
+  "records": [
+    {
+      "analysis_id": "uuid",
+      "analysis_type": "analyze-ecg",
+      "source": "url",
+      "created_at": "2026-04-21T10:00:00+00:00"
+    }
+  ]
+}
+```
+
+### `DELETE /analysis-history/{analysis_id}`
+
+- Deletes a specific analysis history record by id
+
+Success shape:
+
+```json
+{
+  "status": "success",
+  "deleted_analysis_id": "uuid"
 }
 ```
 
