@@ -9,6 +9,8 @@ from fastapi.responses import JSONResponse
 
 from app.logging_config import configure_logging
 from app.schemas import (
+    AnalysisDeleteResponse,
+    AnalysisHistoryListResponse,
     AnalyzeEcgResponse,
     ChatEcgRequest,
     ChatEcgResponse,
@@ -17,6 +19,7 @@ from app.schemas import (
     GenerateApiKeyResponse,
     HealthCheckResponse,
 )
+from app.services.analysis_history_store import AnalysisHistoryStore
 from app.services.vlm_client import (
     DEFAULT_GENERATE_API_EMAIL,
     LifelineAuthenticationError,
@@ -54,6 +57,7 @@ app.add_middleware(
 )
 
 vlm_client = LifelineSDKClient()
+analysis_history_store = AnalysisHistoryStore()
 
 
 @app.middleware("http")
@@ -241,7 +245,11 @@ async def analyze_ecg(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        return AnalyzeEcgResponse(**result)
+        analysis_id = analysis_history_store.add_record(
+            analysis_type="analyze-ecg",
+            source="file",
+        )
+        return AnalyzeEcgResponse(**{**result, "analysis_id": analysis_id})
 
     if image_url is None:
         raise HTTPException(
@@ -268,7 +276,11 @@ async def analyze_ecg(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return AnalyzeEcgResponse(**result)
+    analysis_id = analysis_history_store.add_record(
+        analysis_type="analyze-ecg",
+        source="url",
+    )
+    return AnalyzeEcgResponse(**{**result, "analysis_id": analysis_id})
 
 
 @app.post("/generate-api-key", response_model=GenerateApiKeyResponse)
@@ -319,6 +331,7 @@ async def analyze_ecg_dynamic(
     if not prompt or not prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is required")
 
+    source = "text-only"
     image_bytes = None
     mime_type = None
 
@@ -337,6 +350,10 @@ async def analyze_ecg_dynamic(
                 detail="Image file exceeds 5MB size limit",
             )
         mime_type = image_file.content_type
+        source = "file"
+
+    if image_url and source != "file":
+        source = "url"
 
     if image_url and not _is_valid_http_url(image_url):
         raise HTTPException(
@@ -366,17 +383,42 @@ async def analyze_ecg_dynamic(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     description_text = _result_to_text(raw_result)
+    analysis_id = analysis_history_store.add_record(
+        analysis_type="analyze-ecg-dynamic",
+        source=source,
+    )
     logger.info(
-        "analyze_dynamic_completed raw_result_type=%s description_length=%d",
+        "analyze_dynamic_completed raw_result_type=%s description_length=%d analysis_id=%s source=%s",
         type(raw_result).__name__,
         len(description_text),
+        analysis_id,
+        source,
     )
     
     return DynamicAnalyzeResponse(
         status="success",
         description=description_text,
         raw_result=raw_result,
+        analysis_id=analysis_id,
     )
+
+
+@app.get("/analysis-history", response_model=AnalysisHistoryListResponse)
+def list_analysis_history(limit: int = 50) -> AnalysisHistoryListResponse:
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 200")
+
+    records = analysis_history_store.list_records(limit=limit)
+    return AnalysisHistoryListResponse(status="success", records=records)
+
+
+@app.delete("/analysis-history/{analysis_id}", response_model=AnalysisDeleteResponse)
+def delete_analysis_history(analysis_id: str) -> AnalysisDeleteResponse:
+    deleted = analysis_history_store.delete_record(analysis_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Analysis record not found")
+
+    return AnalysisDeleteResponse(status="success", deleted_analysis_id=analysis_id)
 
 
 @app.post("/chat-ecg", response_model=ChatEcgResponse)
